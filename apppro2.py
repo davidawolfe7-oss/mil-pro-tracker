@@ -104,27 +104,38 @@ with tab2:
 
 with tab3:
     st.header("📊 Executive Export")
+    # Refresh data from database
     df = pd.read_sql("SELECT * FROM trips", conn)
     
     if not df.empty:
-        # Fill empty values to prevent the TypeError crash
         df = df.fillna("N/A")
         st.dataframe(df)
 
-        if st.button("🚀 GENERATE PROFESSIONAL REPORT"):
-            fname = "Mileage_Report_2026.xlsx"
-            with pd.ExcelWriter(fname, engine='xlsxwriter') as writer:
-                df.to_excel(writer, sheet_name='Log', index=False)
-                workbook = writer.book
-                worksheet = writer.sheets['Log']
-                
-                # Format as a clean table
-                (max_row, max_col) = df.shape
-                columns = [{'header': col} for col in df.columns]
-                worksheet.add_table(0, 0, max_row, max_col - 1, {
-                    'columns': columns, 
-                    'style': 'Table Style Medium 9'
-                })
+        # 1. We define the filename first
+        fname = "Mileage_Report_2026.xlsx"
+
+        # 2. This block CREATES the file and then CLOSES it
+        with pd.ExcelWriter(fname, engine='xlsxwriter') as writer:
+            df.to_excel(writer, sheet_name='Log', index=False)
+            workbook = writer.book
+            worksheet = writer.sheets['Log']
+            (max_row, max_col) = df.shape
+            columns = [{'header': col} for col in df.columns]
+            worksheet.add_table(0, 0, max_row, max_col - 1, {
+                'columns': columns, 
+                'style': 'Table Style Medium 9'
+            })
+        
+        # 3. Now that the file is safely closed, we open it for the user to download
+        with open(fname, "rb") as f:
+            st.download_button(
+                label="🚀 DOWNLOAD FOR ACCOUNTANT",
+                data=f,
+                file_name=fname,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    else:
+        st.info("Log some trips to enable export!")
             
             with open(fname, "rb") as f:
                 st.download_button("Download for Accountant", f, file_name=fname)
