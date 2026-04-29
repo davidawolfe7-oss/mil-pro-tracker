@@ -52,27 +52,45 @@ with st.sidebar:
 tab1, tab2, tab3 = st.tabs(["🚀 LOG TRIP", "🎖️ MILITARY IDT", "📊 EXPORT"])
 
 with tab1:
+    with tab1:
     st.header("🚗 Log New Trip")
     
-    # --- SAFE ODOMETER LOOKUP ---
-    last_end_odo = None
-    if selected_v:  # Only run this if a vehicle is picked in the sidebar
+    # 1. Safe Lookup
+    last_end_odo = 0.0
+    if selected_v:
         try:
-            last_entry = pd.read_sql(f"SELECT end_odo FROM trips WHERE vehicle='{selected_v}' ORDER BY id DESC LIMIT 1", conn)
+            query = f"SELECT end_odo FROM trips WHERE vehicle='{selected_v}' ORDER BY id DESC LIMIT 1"
+            last_entry = pd.read_sql(query, conn)
             if not last_entry.empty:
-                last_end_odo = last_entry['end_odo'].iloc[0]
-        except Exception:
-            last_end_odo = None
+                last_end_odo = float(last_entry['end_odo'].iloc[0])
+        except:
+            last_end_odo = 0.0
 
+    # 2. Input Fields
     date = st.date_input("Date", datetime.date.today())
+    start_odo = st.number_input("Start Odometer", value=last_end_odo, step=0.1)
+    end_odo = st.number_input("End Odometer", value=start_odo + 1.0, step=0.1)
     
-    # Use 0 if there is no previous history for this vehicle
-    start_odo = st.number_input("Start Odometer", value=float(last_end_odo) if last_end_odo else 0.0)
-    end_odo = st.number_input("End Odometer", value=float(start_odo) + 1.0)
-    
-    # --- THE NEW GAP LOGIC ---
-    if last_end_odo and start_odo > last_end_odo:
+    # 3. Improved Gap Logic
+    if last_end_odo > 0 and start_odo > last_end_odo:
         gap = start_odo - last_end_odo
+        st.warning(f"⚠️ Gap of {gap} miles detected!")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Log as Personal"):
+                save_trip(date, selected_v, last_end_odo, start_odo, "Personal", 0)
+                st.rerun()
+        with c2:
+            if st.button("Log as Business"):
+                save_trip(date, selected_v, last_end_odo, start_odo, "Business (Missed)", gap * 0.67)
+                st.rerun()
+
+    # 4. Standard Save
+    if st.button("Save Current Trip"):
+        miles = end_odo - start_odo
+        savings = miles * 0.67
+        save_trip(date, selected_v, start_odo, end_odo, "Business", savings)
+        st.success(f"Saved! You earned ${savings:.2f} in deductions.")
         st.warning(f"⚠️ Gap of {gap} miles detected!")
         c1, c2 = st.columns(2)
         with c1:
