@@ -104,18 +104,18 @@ with tab2:
 
 with tab3:
     st.header("📊 Executive Export")
-    # Refresh data from database
     df = pd.read_sql("SELECT * FROM trips", conn)
     
     if not df.empty:
         df = df.fillna("N/A")
         st.dataframe(df)
 
-        # 1. We define the filename first
-        fname = "Mileage_Report_2026.xlsx"
+        import io
+        # Create a buffer (a temporary spot in memory)
+        buffer = io.BytesIO()
 
-        # 2. This block CREATES the file and then CLOSES it
-        with pd.ExcelWriter(fname, engine='xlsxwriter') as writer:
+        # Write the Excel data to that buffer instead of a file
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
             df.to_excel(writer, sheet_name='Log', index=False)
             workbook = writer.book
             worksheet = writer.sheets['Log']
@@ -125,23 +125,14 @@ with tab3:
                 'columns': columns, 
                 'style': 'Table Style Medium 9'
             })
+            # No need to "close" a buffer, it happens automatically here
         
-        # 3. Now that the file is safely closed, we open it for the user to download
-        with open(fname, "rb") as f:
-            st.download_button(
-                label="🚀 DOWNLOAD FOR ACCOUNTANT",
-                data=f,
-                file_name=fname,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        # Pull the data out of the buffer for the download button
+        st.download_button(
+            label="🚀 DOWNLOAD FOR ACCOUNTANT",
+            data=buffer.getvalue(),
+            file_name="Mileage_Report_2026.xlsx",
+            mime="application/vnd.ms-excel"
+        )
     else:
         st.info("Log some trips to enable export!")
-            
-            with open(fname, "rb") as f:
-                st.download_button("Download for Accountant", f, file_name=fname)
-    else:
-        st.info("Log some trips to enable export!")
-            with open(fname, "rb") as f:
-                st.download_button("Download Report", f, file_name=fname)
-    else:
-        st.info("No trips to export yet.")
