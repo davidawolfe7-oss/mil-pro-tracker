@@ -5,7 +5,7 @@ import sqlite3
 import io
 
 # --- DATABASE SETUP ---
-conn = sqlite3.connect('milpro_tactical.db', check_same_thread=False)
+conn = sqlite3.connect('milpro_v3.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS trips 
              (id INTEGER PRIMARY KEY, date TEXT, vehicle TEXT, start_odo REAL, end_odo REAL, 
@@ -57,7 +57,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["🚗 Standard Log", "✈️ IDT / Military Pr
 # --- TAB 1: STANDARD LOG ---
 with tab1:
     if selected_v:
-        # GAP DETECTION LOGIC
+        # FETCH LAST ODO
         last_q = pd.read_sql(f"SELECT end_odo FROM trips WHERE vehicle='{selected_v}' ORDER BY id DESC LIMIT 1", conn)
         last_val = float(last_q['end_odo'].iloc[0]) if not last_q.empty else 0.0
         
@@ -68,11 +68,16 @@ with tab1:
         col1, col2 = st.columns(2)
         with col1:
             s_odo = st.number_input("Start Odometer", value=last_val)
+            # --- UPDATED GAP LOGIC ---
             if s_odo > last_val and last_val != 0:
                 gap = s_odo - last_val
                 st.warning(f"⚠️ Gap detected: {gap} miles missing!")
-                if st.button(f"Log {gap}mi as Personal Gap"):
-                    save_trip(date, selected_v, last_val, s_odo, "Personal", "Gap Fill", 0, 0, 0, 0)
+                gap_cat = st.selectbox("Classify this Gap:", ["Personal", "Business", "Medical", "Charity"])
+                if st.button(f"Save {gap}mi Gap as {gap_cat}"):
+                    rates = {"Business": 0.67, "Medical": 0.21, "Charity": 0.14, "Personal": 0.0}
+                    gap_savings = gap * rates.get(gap_cat, 0)
+                    save_trip(date, selected_v, last_val, s_odo, gap_cat, "Gap Fill", 0, 0, 0, gap_savings)
+                    st.success("Gap Logged!")
                     st.rerun()
         with col2:
             e_odo = st.number_input("End Odometer", value=s_odo + 1.0)
@@ -85,7 +90,7 @@ with tab1:
 
         if st.button("🚀 Save Standard Trip", use_container_width=True):
             save_trip(date, selected_v, s_odo, e_odo, cat, "Ground", fuel_burn, 0, 0, deduction)
-            st.success("Logged!")
+            st.success("Trip Logged!")
             st.rerun()
 
 # --- TAB 2: IDT MILITARY PRO ---
@@ -99,12 +104,13 @@ with tab2:
             idt_date = st.date_input("Duty Date", datetime.date.today(), key="idt_d")
             if mode == "Flight":
                 flight_cost = st.number_input("Flight Ticket Cost ($)", min_value=0.0)
+                airport_parking = st.number_input("Airport Parking Cost ($)", min_value=0.0)
                 rental_at_dest = st.checkbox("Rental Car at Destination?")
-                dest_rental_cost = st.number_input("Rental Cost ($)", min_value=0.0) if rental_at_dest else 0.0
+                dest_rental_cost = st.number_input("Destination Rental Cost ($)", min_value=0.0) if rental_at_dest else 0.0
             else:
                 dist_ow = st.number_input("One-Way Distance", value=50.0)
                 is_rt = st.checkbox("Round Trip", value=True)
-                rental_cost = st.number_input("Rental Daily Rate/Total ($)", value=0.0) if mode == "Rental Car" else 0.0
+                rental_cost = st.number_input("Rental/Tolls/Fees ($)", value=0.0) if mode == "Rental Car" else 0.0
 
         with c2:
             gas_idt = st.number_input("Gas Price/Gal", value=3.50, key="idt_g")
@@ -116,13 +122,18 @@ with tab2:
         # IDT MATH ENGINE
         total_m = (dist_ow * 2 if is_rt else dist_ow) if mode != "Flight" else (airport_dist * 2)
         fuel_idt = (total_m / current_mpg) * gas_idt
-        travel_total = (flight_cost + dest_rental_cost) if mode == "Flight" else rental_cost
         
-        # Savings: Only POV miles get the IRS rate
+        # Calculate out-of-pocket
+        if mode == "Flight":
+            travel_total = flight_cost + dest_rental_cost + airport_parking
+        else:
+            travel_total = rental_cost
+        
+        # POV miles get the IRS rate
         pov_savings = total_m * 0.67 if (mode == "Personal Car (POV)" or (mode == "Flight" and transit_mode == "POV")) else 0.0
 
         st.divider()
-        st.write(f"📊 **Financial Impact:** Fuel: ${fuel_idt:.2f} | Out-of-Pocket: ${travel_total:.2f} | Deduction: ${pov_savings:.2f}")
+        st.write(f"📊 **Financial Summary:** Fuel: ${fuel_idt:.2f} | Costs (Flight/Parking/Rental): ${travel_total:.2f} | Tax Deduction: ${pov_savings:.2f}")
 
         if st.button("🎖️ Save IDT Record", use_container_width=True):
             save_trip(idt_date, selected_v, 0, total_m, "IDT Military", mode, fuel_idt, travel_total, idt_refuels, pov_savings)
@@ -143,16 +154,16 @@ with tab4:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Distance", f"{df['dist'].sum():,.1f} mi")
         m2.metric("Tax Deductions", f"${df['savings'].sum():,.2f}")
-        m3.metric("Total Costs", f"${df['fuel_cost'].sum() + df['travel_cost'].sum():,.2f}")
-        m4.metric("Refuels", int(df['refuels'].sum()))
+        m3.metric("Total Expenses", f"${df['fuel_cost'].sum() + df['travel_cost'].sum():,.2f}")
+        m4.metric("Refuel Stops", int(df['refuels'].sum()))
         
         st.divider()
-        st.subheader("Spending vs. Savings")
+        st.subheader("Savings vs. Expenses")
         chart_data = pd.DataFrame({
-            'Category': ['Fuel', 'Travel (Rentals/Flights)', 'Tax Savings'],
-            'Dollars': [df['fuel_cost'].sum(), df['travel_cost'].sum(), df['savings'].sum()]
+            'Category': ['Fuel', 'Travel Costs', 'Tax Savings'],
+            'Total Dollars': [df['fuel_cost'].sum(), df['travel_cost'].sum(), df['savings'].sum()]
         })
-        st.bar_chart(data=chart_data, x='Category', y='Dollars')
+        st.bar_chart(data=chart_data, x='Category', y='Total Dollars')
 
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
