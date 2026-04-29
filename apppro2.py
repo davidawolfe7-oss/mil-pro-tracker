@@ -52,40 +52,34 @@ with st.sidebar:
 tab1, tab2, tab3 = st.tabs(["🚀 LOG TRIP", "🎖️ MILITARY IDT", "📊 EXPORT"])
 
 with tab1:
-    if not vehicles:
-        st.warning("Add a vehicle in the sidebar to start.")
-    else:
-        v_choice = st.selectbox("Current Vehicle", vehicles)
-        last_odo = get_last_odo(v_choice)
-        
-        # GPS Simulation Mode
-        is_tracking = st.toggle("🛰️ Enable GPS Tracking Mode")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            start = st.number_input("Start Odometer", value=last_odo)
-        with col2:
-            end = st.number_input("End Odometer", value=start + 1.0)
-            
-        # FIXED GAP LOGIC
-        if start > last_odo and last_odo > 0:
-            gap_size = start - last_odo
-            st.error(f"⚠️ {gap_size} mile Gap Detected! Log as Personal?")
-            if st.button("Fix Gap & Save"):
-                c.execute("INSERT INTO trips (timestamp, vehicle, purpose, miles, savings) VALUES (?,?,?,?,?)",
-                          (datetime.now().strftime("%Y-%m-%d %H:%M"), v_choice, "Personal Gap", gap_size, 0.0))
-                conn.commit()
+    st.header("🚗 Log New Trip")
+    # Fetch last entry for the gap check
+    last_entry = pd.read_sql(f"SELECT end_odo FROM trips WHERE vehicle='{selected_v}' ORDER BY id DESC LIMIT 1", conn)
+    last_end_odo = last_entry['end_odo'].iloc[0] if not last_entry.empty else None
+
+    date = st.date_input("Date", datetime.date.today())
+    start_odo = st.number_input("Start Odometer", value=last_end_odo if last_end_odo else 0)
+    end_odo = st.number_input("End Odometer", value=start_odo + 1)
+    
+    # --- THE NEW GAP LOGIC ---
+    if last_end_odo and start_odo > last_end_odo:
+        gap = start_odo - last_end_odo
+        st.warning(f"⚠️ Gap of {gap} miles detected!")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Log as Personal"):
+                save_trip(date, selected_v, last_end_odo, start_odo, "Personal", 0)
+                st.rerun()
+        with c2:
+            if st.button("Log as Business"):
+                save_trip(date, selected_v, last_end_odo, start_odo, "Business (Missed)", gap)
                 st.rerun()
 
-        if st.button("✅ SAVE TRIP", width='stretch'):
-            miles = end - start
-            savings = miles * 0.725
-            now = datetime.now().strftime("%Y-%m-%d %H:%M")
-            c.execute("INSERT INTO trips (timestamp, vehicle, purpose, start_odo, end_odo, miles, savings, is_idt) VALUES (?,?,?,?,?,?,?,0)",
-                      (now, v_choice, "Business", start, end, miles, savings))
-            conn.commit()
-            st.balloons()
-            st.success(f"Saved {miles} miles!")
+    if st.button("Save Trip"):
+        miles = end_odo - start_odo
+        savings = miles * 0.67  # Standard 2024-2026 rate
+        save_trip(date, selected_v, start_odo, end_odo, "Business", savings)
+        st.success(f"Saved! You earned ${savings:.2f} in deductions.")
 
 with tab2:
     st.subheader("IDT / Drill Travel")
@@ -109,36 +103,33 @@ with tab2:
         st.success("IDT Data Saved to Secure Log.")
 
 with tab3:
-    st.header("Financial Export")
+    st.header("📊 Executive Export")
     df = pd.read_sql("SELECT * FROM trips", conn)
+    
     if not df.empty:
-        st.dataframe(df, width='stretch')
-        
-        # --- PROFESSIONAL EXCEL ENGINE ---
-        if st.button("📊 GENERATE PROFESSIONAL REPORT"):
-            fname = "Official_Tax_Report_2026.xlsx"
+        # Fill empty values to prevent the TypeError crash
+        df = df.fillna("N/A")
+        st.dataframe(df)
+
+        if st.button("🚀 GENERATE PROFESSIONAL REPORT"):
+            fname = "Mileage_Report_2026.xlsx"
             with pd.ExcelWriter(fname, engine='xlsxwriter') as writer:
-                df.to_excel(writer, sheet_name='Detailed Log', index=False)
-                
+                df.to_excel(writer, sheet_name='Log', index=False)
                 workbook = writer.book
-                worksheet = writer.sheets['Detailed Log']
+                worksheet = writer.sheets['Log']
                 
-                # Pro Formatting
-                header_fmt = workbook.add_format({'bold': True, 'bg_color': '#1F4E78', 'font_color': 'white', 'border': 1})
-                money_fmt = workbook.add_format({'num_format': '$#,##0.00'})
-                
-                for col_num, value in enumerate(df.columns.values):
-                    worksheet.write(0, col_num, value, header_format=header_fmt)
-                
-                worksheet.freeze_panes(1, 0) # Professional touch
-                worksheet.set_column('A:L', 15)
-                
-                # Summary Sheet
-                summary = workbook.add_worksheet('Accountant Summary')
-                summary.write('A1', 'Total Mileage Deduction (2026)', header_fmt)
-                summary.write('B1', df['savings'].sum(), money_fmt)
-                
-            st.success(f"Report Created: {fname}")
+                # Format as a clean table
+                (max_row, max_col) = df.shape
+                columns = [{'header': col} for col in df.columns]
+                worksheet.add_table(0, 0, max_row, max_col - 1, {
+                    'columns': columns, 
+                    'style': 'Table Style Medium 9'
+                })
+            
+            with open(fname, "rb") as f:
+                st.download_button("Download for Accountant", f, file_name=fname)
+    else:
+        st.info("Log some trips to enable export!")
             with open(fname, "rb") as f:
                 st.download_button("Download Report", f, file_name=fname)
     else:
