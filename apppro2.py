@@ -52,7 +52,6 @@ with st.sidebar:
 tab1, tab2, tab3 = st.tabs(["🚀 LOG TRIP", "🎖️ MILITARY IDT", "📊 EXPORT"])
 
 with tab1:
-    with tab1:
     st.header("🚗 Log New Trip")
     
     # 1. Safe Lookup
