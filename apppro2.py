@@ -4,177 +4,203 @@ import datetime
 import sqlite3
 import io
 
-# --- 1. STABLE DATABASE SETUP ---
-# Incremented version to ensure a clean schema start
-conn = sqlite3.connect('milpro_v6_tactical.db', check_same_thread=False)
+# --- 1. DATABASE SETUP ---
+conn = sqlite3.connect('milpro_v7_tactical.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS trips 
              (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, vehicle TEXT, 
-              start_odo REAL, end_odo REAL, dist REAL, type TEXT, 
-              fuel_spent REAL, savings REAL, actual_expense REAL)''')
+              dist REAL, type TEXT, details TEXT, savings REAL)''')
 c.execute('''CREATE TABLE IF NOT EXISTS garage 
-             (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, 
-              mpg REAL, is_low_mpg INTEGER)''')
+             (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, mpg REAL)''')
 conn.commit()
 
 # IRS 2026 RATES
 RATES = {"Business": 0.725, "Medical": 0.22, "Charity": 0.14, "Personal": 0.0}
 
-# --- 2. APP INTERFACE & MILITARY THEME ---
-st.set_page_config(page_title="Mil-Pro Tactical Tracker", layout="wide", page_icon="🇺🇸")
+# --- 2. APP INTERFACE & HIGH-CONTRAST THEME ---
+st.set_page_config(page_title="Mil-Pro Tactical", layout="wide", page_icon="🇺🇸")
 
 st.markdown("""
     <style>
-    .stApp { border-top: 12px solid #B22234; }
-    h1 { color: #3C3B6E; text-align: center; }
-    .stButton>button { background-color: #3C3B6E !important; color: white !important; width: 100%; }
-    .stMetric { background-color: #f1f3f6; padding: 10px; border-radius: 10px; border-left: 5px solid #3C3B6E; }
+    .stApp { border-top: 15px solid #B22234; background-color: #f4f7f6; }
+    h1, h2, h3 { color: #002868 !important; font-family: 'Arial Black', sans-serif; }
+    
+    /* Metric Card Fix - High Visibility */
+    [data-testid="stMetricValue"] { color: #002868 !important; font-size: 2rem !important; font-weight: bold !important; }
+    [data-testid="stMetricDelta"] { color: #B22234 !important; font-weight: bold !important; }
+    [data-testid="stMetric"] { 
+        background-color: #ffffff; 
+        padding: 15px; 
+        border-radius: 10px; 
+        border: 2px solid #002868;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+    }
+    
+    .stButton>button { 
+        background-color: #002868 !important; 
+        color: white !important; 
+        font-weight: bold; 
+        border-radius: 5px;
+        height: 3em;
+    }
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #e0e0e0;
+        border-radius: 5px 5px 0px 0px;
+        padding: 10px 20px;
+    }
+    .stTabs [aria-selected="true"] { background-color: #002868 !important; color: white !important; }
     </style>
-    <div>
-        <h1>🇺🇸 MIL-PRO TACTICAL TAX TRACKER 🇺🇸</h1>
-        <p style="text-align: center;"><i>Precision Tracking for Service Members</i></p>
+    <div style="text-align: center;">
+        <h1>🇺🇸 MIL-PRO TACTICAL COMMAND 🇺🇸</h1>
+        <p style="color: #333;"><i>Strategic Tax Deduction & Logistics Log</i></p>
     </div>
     """, unsafe_allow_html=True)
 
-# --- 3. SIDEBAR: THE GARAGE ---
+# --- 3. SIDEBAR: GARAGE ---
 with st.sidebar:
-    st.header("🚘 Tactical Garage")
+    st.header("🚘 Fleet Management")
     garage_df = pd.read_sql("SELECT * FROM garage", conn)
+    selected_v = st.selectbox("Active Vehicle", garage_df['name'].tolist()) if not garage_df.empty else None
     
-    if not garage_df.empty:
-        selected_v = st.selectbox("Active Vehicle", garage_df['name'].tolist())
-        v_info = garage_df[garage_df['name'] == selected_v].iloc[0]
-        
-        if v_info['is_low_mpg']:
-            st.warning(f"⚠️ {selected_v} has low MPG. We are automatically tracking 'Actual Expenses' for a potentially higher deduction.")
-        
-        if st.button("🗑️ Retire Vehicle"):
-            c.execute("DELETE FROM garage WHERE name=?", (selected_v,))
-            conn.commit()
-            st.rerun()
-    else:
-        st.info("No vehicles registered. Add one below.")
-        selected_v = None
+    if st.button("🗑️ Remove Selected Vehicle") and selected_v:
+        c.execute("DELETE FROM garage WHERE name=?", (selected_v,))
+        conn.commit()
+        st.rerun()
 
     st.divider()
     with st.expander("➕ Register New Vehicle"):
-        nv_name = st.text_input("Name (e.g. Chevy Silverado)")
-        nv_mpg = st.number_input("Average MPG", min_value=1.0, value=15.0)
-        if st.button("Save to Garage"):
-            if nv_name:
-                try:
-                    low_mpg_flag = 1 if nv_mpg < 18 else 0
-                    c.execute("INSERT INTO garage (name, mpg, is_low_mpg) VALUES (?,?,?)", (nv_name, nv_mpg, low_mpg_flag))
-                    conn.commit()
-                    st.success(f"{nv_name} Added!")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("This vehicle name already exists! Try adding a year or color (e.g. '2024 F-150').")
-            else:
-                st.error("Please enter a name.")
+        nv_name = st.text_input("Vehicle Name")
+        nv_mpg = st.number_input("MPG", min_value=1.0, value=20.0)
+        if st.button("Confirm Registration"):
+            try:
+                c.execute("INSERT INTO garage (name, mpg) VALUES (?,?)", (nv_name, nv_mpg))
+                conn.commit()
+                st.success("Vehicle Added to Fleet")
+                st.rerun()
+            except: st.error("Duplicate Name Detected.")
 
-# --- 4. MAIN NAVIGATION TABS ---
-tab1, tab2, tab3 = st.tabs(["🚀 Mission Log (GPS)", "🎖️ IDT Tactical", "📊 Executive Report"])
+# --- 4. NAVIGATION ---
+if 'page' not in st.session_state:
+    st.session_state.page = 'main'
 
-# --- TAB 1: MISSION LOG ---
-with tab1:
-    if selected_v:
-        # Check for Odometer Gaps
-        last_q = pd.read_sql(f"SELECT end_odo FROM trips WHERE vehicle='{selected_v}' ORDER BY id DESC LIMIT 1", conn)
-        last_val = float(last_q['end_odo'].iloc[0]) if not last_q.empty else 0.0
-        
-        st.subheader(f"Unit: {selected_v}")
-        c1, c2 = st.columns(2)
-        with c1:
-            s_odo = st.number_input("Start Odometer", value=last_val)
-            # Gap Logic
-            if s_odo > last_val and last_val > 0:
-                gap = s_odo - last_val
-                st.error(f"🚨 GAP DETECTED: {gap} miles missing!")
-                gap_cat = st.selectbox("Classify Gap Miles", ["Business", "Medical", "Charity", "Personal"], key="gap_sel")
-                if st.button("Reconcile Missing Miles"):
-                    g_savings = gap * RATES.get(gap_cat, 0.0)
-                    c.execute("INSERT INTO trips (date, vehicle, start_odo, end_odo, dist, type, savings, actual_expense) VALUES (?,?,?,?,?,?,?,?)",
-                              (datetime.date.today(), selected_v, last_val, s_odo, gap, gap_cat, g_savings, 0))
-                    conn.commit()
-                    st.success("Log Integrity Restored.")
-                    st.rerun()
-        
-        with c2:
-            e_odo = st.number_input("End Odometer", value=s_odo + 1.0)
-            cat = st.selectbox("Mission Category", ["Business", "Medical", "Charity", "Personal"], key="main_cat")
+if st.session_state.page == 'main':
+    tab1, tab2, tab3 = st.tabs(["🚀 Mission Log", "🎖️ IDT Tactical", "📊 Executive Report"])
 
-        st.divider()
-        st.subheader("⛽ Refuel Log")
-        refuel = st.checkbox("Did you add fuel during this trip?")
-        f_cost = st.number_input("Fuel Cost ($)", value=0.0) if refuel else 0.0
-
-        if st.button("🏁 End Trip & Save", use_container_width=True):
-            dist = e_odo - s_odo
-            savings = dist * RATES.get(cat, 0.0)
-            # Actual Expense Logic: Fuel + maintenance estimate ($0.22/mile)
-            actual = f_cost + (dist * 0.22) 
+    # --- TAB 1: MISSION LOG ---
+    with tab1:
+        if selected_v:
+            last_q = pd.read_sql(f"SELECT end_odo FROM (SELECT end_odo, id FROM trips WHERE vehicle='{selected_v}' AND end_odo IS NOT NULL ORDER BY id DESC LIMIT 1)", conn)
+            last_val = float(last_q['end_odo'].iloc[0]) if not last_q.empty else 0.0
             
-            c.execute("""INSERT INTO trips (date, vehicle, start_odo, end_odo, dist, type, fuel_spent, savings, actual_expense) 
-                         VALUES (?,?,?,?,?,?,?,?,?)""",
-                      (datetime.date.today(), selected_v, s_odo, e_odo, dist, cat, f_cost, savings, actual))
-            conn.commit()
-            st.balloons()
-            st.toast(f"Saved! Deduction: ${savings:.2f}")
-            st.rerun()
-    else:
-        st.info("Step 1: Open the sidebar and register a vehicle.")
+            st.subheader(f"Unit: {selected_v}")
+            c1, c2 = st.columns(2)
+            with c1:
+                s_odo = st.number_input("Start Odometer", value=last_val)
+                if s_odo > last_val and last_val > 0:
+                    gap = s_odo - last_val
+                    st.error(f"🚨 GAP DETECTED: {gap} Miles Missing")
+                    if st.button("Log Gap as Personal (Cleanup)"):
+                        c.execute("INSERT INTO trips (date, vehicle, dist, type, savings) VALUES (?,?,?,?,?)",
+                                  (datetime.date.today(), selected_v, gap, "Personal Gap", 0))
+                        conn.commit()
+                        st.rerun()
+            with c2:
+                e_odo = st.number_input("End Odometer", value=s_odo + 5.0)
+                cat = st.selectbox("Mission Type", ["Business", "Medical", "Charity", "Personal"])
 
-# --- TAB 2: IDT TACTICAL ---
-with tab2:
-    st.subheader("Military IDT & Orders Tracker")
-    st.markdown("> Use this for Drill or Travel where your DTS/GSA pay didn't cover the full cost.")
-    
-    col_a, col_b = st.columns(2)
-    with col_a:
-        idt_date = st.date_input("Date of Orders", datetime.date.today())
-        idt_mode = st.radio("Mode", ["POV (Personal)", "Rental", "Flight"])
-        idt_dist_ow = st.number_input("One-Way Miles", value=50.0)
-    with col_b:
-        idt_pay = st.number_input("Military Reimbursement Received ($)", value=0.0)
-        idt_costs = st.number_input("Gas/Parking/Tolls Spent ($)", value=0.0)
+            if st.button("🏁 Finalize Mission Log", use_container_width=True):
+                dist = e_odo - s_odo
+                savings = dist * RATES.get(cat, 0.0)
+                c.execute("INSERT INTO trips (date, vehicle, start_odo, end_odo, dist, type, savings) VALUES (?,?,?,?,?,?,?)",
+                          (datetime.date.today(), selected_v, s_odo, e_odo, dist, cat, savings))
+                conn.commit()
+                st.success(f"✅ MISSION SECURE: Estimated Tax Benefit: ${savings:.2f}")
+                st.balloons()
+        else:
+            st.warning("Register a vehicle in the sidebar to begin.")
 
-    # Calculation logic
-    total_idt_mi = idt_dist_ow * 2
-    irs_value = total_idt_mi * 0.725
-    real_out_of_pocket = idt_costs + irs_value
-    net_deduction = max(0.0, real_out_of_pocket - idt_pay)
-
-    st.metric("Unreimbursed Tax Deduction", f"${net_deduction:.2f}", delta="Net Benefit")
-    
-    if st.button("🎖️ Save Military Tactical Log"):
-        c.execute("INSERT INTO trips (date, vehicle, dist, type, savings, fuel_spent) VALUES (?,?,?,?,?,?)",
-                  (idt_date, "IDT-MIL", total_idt_mi, "IDT Military", net_deduction, idt_costs))
-        conn.commit()
-        st.success("Orders Logged.")
-
-# --- TAB 3: EXECUTIVE REPORT ---
-with tab3:
-    st.header("📊 Final Tax Report (Accountant Ready)")
-    df = pd.read_sql("SELECT date, vehicle, dist, type, fuel_spent, savings as mileage_deduction, actual_expense FROM trips", conn)
-    
-    if not df.empty:
-        # High-level stats
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Standard Mileage Deduction", f"${df['mileage_deduction'].sum():,.2f}")
-        m2.metric("Total Fuel/Expense Log", f"${df['fuel_spent'].sum() + df['actual_expense'].sum():,.2f}")
-        m3.metric("Total Mission Miles", f"{df['dist'].sum():,.1f}")
-
-        st.divider()
-        st.dataframe(df, use_container_width=True)
-
-        # Excel Export
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine='xlsxwriter') as writer:
-            df.to_excel(writer, sheet_name='2026_Tax_Log', index=False)
+    # --- TAB 2: IDT TACTICAL ---
+    with tab2:
+        st.subheader("🎖️ Inactive Duty Training (IDT) Logistics")
+        mode = st.radio("Primary Travel Method", ["POV (Driving Personal Car)", "Flight / Commercial", "Rental Only"], horizontal=True)
         
-        st.download_button("📩 Download Final Spreadsheet", data=buf.getvalue(), 
-                           file_name=f"MilPro_Tax_Report_{datetime.date.today()}.xlsx", 
-                           use_container_width=True)
-    else:
-        st.info("Log your first sortie to see the report.")
+        col1, col2 = st.columns(2)
+        with col1:
+            idt_date = st.date_input("Duty Date", datetime.date.today())
+            gas = st.number_input("Gas Expense ($)", min_value=0.0)
+            tolls = st.number_input("Tolls ($)", min_value=0.0)
+            parking = st.number_input("Parking Fees ($)", min_value=0.0)
+        
+        with col2:
+            reimb = st.number_input("DTS / Government Reimbursement ($)", min_value=0.0)
+            if mode == "POV (Driving Personal Car)":
+                miles = st.number_input("Total Round-Trip Miles", min_value=0.0)
+                total_cost = (miles * 0.725) + gas + tolls + parking
+            elif mode == "Flight / Commercial":
+                f_cost = st.number_input("Flight Ticket Cost ($)", min_value=0.0)
+                apt_miles = st.number_input("Miles to/from Airport (Home)", min_value=0.0)
+                dest_rent = st.number_input("Destination Rental/Uber ($)", min_value=0.0)
+                total_cost = f_cost + (apt_miles * 0.725) + dest_rent + tolls + parking
+            else:
+                r_cost = st.number_input("Total Rental Cost ($)", min_value=0.0)
+                total_cost = r_cost + gas + tolls + parking
+
+        net_deduction = max(0.0, total_cost - reimb)
+        
+        st.divider()
+        st.metric("IDT UNREIMBURSED BENEFIT", f"${net_deduction:.2f}", help="Total cost of travel minus what the military paid you.")
+
+        if st.button("🎖️ Archive IDT Tactical Record", use_container_width=True):
+            details = f"Mode: {mode} | Gas: {gas} | Tolls: {tolls} | Parking: {parking}"
+            c.execute("INSERT INTO trips (date, vehicle, dist, type, details, savings) VALUES (?,?,?,?,?,?)",
+                      (idt_date, "IDT-MIL", 0, "Military IDT", details, net_deduction))
+            conn.commit()
+            st.success("Tactical record stored.")
+
+    # --- TAB 3: EXECUTIVE REPORT ---
+    with tab3:
+        st.subheader("📊 Executive Financial Summary")
+        df = pd.read_sql("SELECT date, vehicle, dist as miles, type, details, savings as tax_value FROM trips", conn)
+        
+        if not df.empty:
+            m1, m2 = st.columns(2)
+            m1.metric("TOTAL TAX DEDUCTIONS", f"${df['tax_value'].sum():,.2f}")
+            m2.metric("TOTAL MISSION MILES", f"{df['miles'].sum():,.1f}")
+            
+            st.dataframe(df, use_container_width=True)
+            
+            if st.button("🛠️ Prepare Final Spreadsheet"):
+                st.session_state.page = 'download'
+                st.rerun()
+        else:
+            st.info("No data recorded for this period.")
+
+# --- 5. DOWNLOAD PAGE ---
+else:
+    st.subheader("📩 Tactical Export Ready")
+    df_export = pd.read_sql("SELECT * FROM trips", conn)
+    
+    # Professional Excel Styling
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_export.to_excel(writer, index=False, sheet_name='2026_Tax_Log')
+        workbook = writer.book
+        worksheet = writer.sheets['2026_Tax_Log']
+        
+        # Add formatting
+        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#002868', 'font_color': 'white', 'border': 1})
+        for col_num, value in enumerate(df_export.columns.values):
+            worksheet.write(0, col_num, value, header_fmt)
+            worksheet.set_column(col_num, col_num, 15) # Adjust width
+            
+    st.download_button(
+        label="💾 Download Official Spreadsheet",
+        data=output.getvalue(),
+        file_name=f"MilPro_Tax_Log_{datetime.date.today()}.xlsx",
+        mime="application/vnd.ms-excel"
+    )
+    
+    if st.button("🔙 Return to Command Dashboard"):
+        st.session_state.page = 'main'
+        st.rerun()
