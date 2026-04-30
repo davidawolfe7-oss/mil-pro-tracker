@@ -188,8 +188,5 @@ else:
         df_export.to_excel(writer, index=False, sheet_name='Tax_Log')
     
     st.download_button(label="💾 DOWNLOAD OFFICIAL 2026 LOG", data=output.getvalue(), 
-    st.markdown('<div class="return-btn">', unsafe_allow_html=True)
-    st.button("🔙 RETURN TO COMMAND DASHBOARD", on_click=navigate, args=['main'])
-    st.markdown('</div>', unsafe_allow_html=True)
                        file_name=f"MilPro_Tax_Report_{datetime.date.today()}.xlsx", mime="application/vnd.ms-excel")
         
