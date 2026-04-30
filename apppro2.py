@@ -5,7 +5,7 @@ import sqlite3
 import io
 
 # --- 1. DATABASE SETUP ---
-conn = sqlite3.connect('milpro_tactical_v12.db', check_same_thread=False)
+conn = sqlite3.connect('milpro_tactical_v13.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS trips 
              (id INTEGER PRIMARY KEY AUTOINCREMENT, date_start TEXT, date_end TEXT, vehicle TEXT, 
@@ -32,16 +32,25 @@ st.markdown("""
     h1, h2, h3, p, label { color: #ffffff !important; font-weight: bold !important; }
     [data-testid="stMetric"] { background-color: #1f2937; padding: 15px; border-radius: 10px; border: 1px solid #3b82f6; }
     [data-testid="stMetricValue"] { color: #3b82f6 !important; }
+    
+    /* Standard Buttons */
     .stButton>button { background-color: #1d4ed8 !important; color: white !important; font-weight: bold; width: 100%; }
-    .return-btn > button { background-color: #B22234 !important; border: 2px solid white !important; } 
+    
+    /* The "Header" Abort/Return Button for Navigation */
+    .return-btn > button { 
+        background-color: #B22234 !important; 
+        border: 2px solid #ffffff !important; 
+        font-size: 1.2rem !important;
+        height: 3em !important;
+    } 
     </style>
     <div style="text-align: center; padding-bottom: 20px;">
         <h1 style="font-size: 2.5rem; margin-bottom: 0;">🦅 MIL-PRO COMMAND</h1>
-        <p style="letter-spacing: 2px; color: #3b82f6;">STRATEGIC LOGISTICS & REIMBURSEMENT</p>
+        <p style="letter-spacing: 2px; color: #3b82f6;">STRATEGIC LOGISTICS & TAX INTELLIGENCE</p>
     </div>
     """, unsafe_allow_html=True)
 
-# --- 3. NAVIGATION LOGIC ---
+# --- 3. NAVIGATION ---
 if 'page' not in st.session_state:
     st.session_state.page = 'main'
 
@@ -54,7 +63,7 @@ with st.sidebar:
     garage_df = pd.read_sql("SELECT * FROM garage", conn)
     active_v = st.selectbox("ACTIVE VEHICLE", garage_df['name'].tolist()) if not garage_df.empty else None
     
-    if st.button("🗑️ Decommission") and active_v:
+    if st.button("🗑️ Decommission Vehicle") and active_v:
         c.execute("DELETE FROM garage WHERE name=?", (active_v,))
         conn.commit()
         st.rerun()
@@ -66,90 +75,99 @@ with st.sidebar:
             try:
                 c.execute("INSERT INTO garage (name, mpg) VALUES (?,?)", (nv_name, nv_mpg)); conn.commit()
                 st.rerun()
-            except: st.error("Name taken.")
+            except: st.error("Duplicate Name.")
 
 # --- 5. MAIN DASHBOARD ---
 if st.session_state.page == 'main':
     tab1, tab2, tab3 = st.tabs(["🚀 Mission Log", "🎖️ IDT Tactical", "📊 Executive Report"])
 
+    # --- TAB 1: MISSION LOG (SIMPLIFIED) ---
     with tab1:
         if active_v:
             last_q = pd.read_sql(f"SELECT end_odo FROM trips WHERE vehicle='{active_v}' ORDER BY id DESC LIMIT 1", conn)
             last_val = float(last_q['end_odo'].iloc[0]) if not last_q.empty else 0.0
             
-            c1, c2 = st.columns(2)
+            st.subheader(f"Log Sortie: {active_v}")
+            c1, c2, c3 = st.columns([1, 1, 1])
             with c1:
-                d_start = st.date_input("Mission Start", datetime.date.today())
-                s_odo = st.number_input("Start Odometer", value=last_val)
+                m_date = st.date_input("Mission Date", datetime.date.today())
             with c2:
-                d_end = st.date_input("Mission End", datetime.date.today())
+                s_odo = st.number_input("Start Odometer", value=last_val)
+            with c3:
                 e_odo = st.number_input("End Odometer", value=s_odo + 5.0)
             
-            cat = st.selectbox("Category", ["Business", "Medical", "Charity", "Personal"])
-            if st.button("🏁 Finalize & Secure Log"):
+            cat = st.selectbox("Deduction Category", ["Business", "Medical", "Charity", "Personal"])
+            
+            if st.button("🏁 Finalize & Secure Log", use_container_width=True):
                 dist = e_odo - s_odo
                 val = dist * RATES.get(cat, 0.0)
+                # Store date as both start/end to maintain DB compatibility
                 c.execute("INSERT INTO trips (date_start, date_end, vehicle, start_odo, end_odo, dist, type, savings) VALUES (?,?,?,?,?,?,?,?)",
-                          (d_start, d_end, active_v, s_odo, e_odo, dist, cat, val))
+                          (m_date, m_date, active_v, s_odo, e_odo, dist, cat, val))
                 conn.commit()
-                st.success("Log Secured.")
+                st.success(f"Mission Logged. Benefit: ${val:.2f}")
+                st.balloons()
         else:
-            st.info("Register a vehicle in the sidebar.")
+            st.info("Register a vehicle in the sidebar to begin tracking.")
 
+    # --- TAB 2: IDT TACTICAL (THROUGH DATES & REIMBURSEMENT) ---
     with tab2:
         st.subheader("🎖️ IDT Deployment Logistics")
-        mode = st.radio("Travel Mode", ["POV (Self Drive)", "Flight / Commercial", "Rental Unit"], horizontal=True)
+        mode = st.radio("Travel Method", ["POV (Self Drive)", "Flight / Commercial", "Rental Unit"], horizontal=True)
         
         col1, col2 = st.columns(2)
         with col1:
-            idt_start = st.date_input("Orders Start", datetime.date.today())
-            idt_end = st.date_input("Orders End", datetime.date.today())
-            gas = st.number_input("Fuel/Gas Expense ($)", min_value=0.0)
-            # Only show parking for flights
+            idt_start = st.date_input("Orders Start Date", datetime.date.today())
+            idt_end = st.date_input("Orders Through Date", datetime.date.today())
+            gas = st.number_input("Total Fuel/Gas ($)", min_value=0.0)
+            # Parking only for Flight mode
             parking = st.number_input("Airport Parking/Fees ($)", min_value=0.0) if mode == "Flight / Commercial" else 0.0
-            lodging = st.number_input("Unreimbursed Lodging/Meals ($)", min_value=0.0)
+            lodging = st.number_input("Unreimbursed Meals/Lodging ($)", min_value=0.0)
         
         with col2:
-            reimb = st.number_input("Total Gov Reimbursement ($)", value=750.0)
+            reimb = st.number_input("Total Government Reimbursement ($)", value=750.0, help="Standard reimbursement cap.")
             if mode == "POV (Self Drive)":
-                miles = st.number_input("Total Round-Trip Miles", min_value=0.0)
+                miles = st.number_input("Total Trip Miles", min_value=0.0)
                 total_cost = (miles * 0.725) + gas + lodging
             elif mode == "Flight / Commercial":
-                f_cost = st.number_input("Flight Cost ($)", min_value=0.0)
-                apt_mi = st.number_input("Miles to Airport (POV)", min_value=0.0)
+                f_cost = st.number_input("Flight Ticket Cost ($)", min_value=0.0)
+                apt_mi = st.number_input("POV Miles to/from Airport", min_value=0.0)
                 total_cost = f_cost + (apt_mi * 0.725) + gas + parking + lodging
             else:
-                r_cost = st.number_input("Rental Total ($)", min_value=0.0)
+                r_cost = st.number_input("Rental Base Cost ($)", min_value=0.0)
                 total_cost = r_cost + gas + lodging
 
         net = max(0.0, total_cost - reimb)
         st.divider()
-        st.metric("TAX DEDUCTION ELIGIBILITY", f"${net:.2f}", help="Only amounts over reimbursement are deductible.")
+        st.metric("DEDUCTIBLE TAX BENEFIT", f"${net:.2f}", help="Difference between actual costs and the $750 gov payment.")
         
-        if st.button("🎖️ Archive IDT Record"):
+        if st.button("🎖️ Archive Tactical Record", use_container_width=True):
+            details = f"Mode: {mode} | Gas: {gas} | Lodging: {lodging}"
             c.execute("INSERT INTO trips (date_start, date_end, vehicle, dist, type, details, savings) VALUES (?,?,?,?,?,?,?)",
-                      (idt_start, idt_end, "IDT-TACTICAL", 0, "Military IDT", f"Mode: {mode}", net))
+                      (idt_start, idt_end, "IDT-TACTICAL", 0, "Military IDT", details, net))
             conn.commit()
-            st.success("Record Archived.")
+            st.success("Tactical record stored.")
 
+    # --- TAB 3: EXECUTIVE REPORT ---
     with tab3:
         df = pd.read_sql("SELECT * FROM trips", conn)
         if not df.empty:
-            st.metric("TOTAL 2026 DEDUCTIONS", f"${df['savings'].sum():,.2f}")
+            st.metric("TOTAL ACCUMULATED DEDUCTIONS", f"${df['savings'].sum():,.2f}")
             st.dataframe(df, use_container_width=True)
             st.button("🛠️ Prepare Final Export", on_click=navigate, args=['download'])
         else:
-            st.info("No data.")
+            st.info("No mission data recorded.")
 
-# --- 6. EXPORT SCREEN ---
+# --- 6. EXPORT SCREEN (WITH NAVIGATION FIX) ---
 else:
-    # THE RE-ENTRY POINT (Placed at top for visibility)
+    # RETURN BUTTON AT THE TOP (The Red "Safe" Button)
     st.markdown('<div class="return-btn">', unsafe_allow_html=True)
-    st.button("🔙 RETURN TO MAIN DASHBOARD", on_click=navigate, args=['main'])
+    st.button("🔙 RETURN TO COMMAND DASHBOARD", on_click=navigate, args=['main'])
     st.markdown('</div>', unsafe_allow_html=True)
     
     st.divider()
     st.subheader("📩 Tactical Export Ready")
+    st.write("Download your official 2026 report. Use the red button above to return to the log.")
     
     df_export = pd.read_sql("SELECT * FROM trips", conn)
     output = io.BytesIO()
@@ -163,8 +181,8 @@ else:
             worksheet.set_column(col_num, col_num, 18)
         
     st.download_button(
-        label="💾 Download Official Spreadsheet",
+        label="💾 Download Official 2026 Spreadsheet",
         data=output.getvalue(),
-        file_name=f"Tactical_Tax_Report_{datetime.date.today()}.xlsx",
+        file_name=f"MilPro_Tax_Report_{datetime.date.today()}.xlsx",
         mime="application/vnd.ms-excel"
     )
